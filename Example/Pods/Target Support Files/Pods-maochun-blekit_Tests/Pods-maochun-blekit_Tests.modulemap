@@ -1,0 +1,6 @@
+framework module Pods_maochun_blekit_Tests {
+  umbrella header "Pods-maochun-blekit_Tests-umbrella.h"
+
+  export *
+  module * { export * }
+}

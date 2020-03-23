@@ -1,0 +1,22 @@
+{
+  "name": "maochun-blekit",
+  "version": "0.1.0",
+  "summary": "A short description of maochun-blekit.",
+  "description": "TODO: Add long description of the pod here.",
+  "homepage": "https://github.com/maochuns/maochun-blekit",
+  "license": {
+    "type": "MIT",
+    "file": "LICENSE"
+  },
+  "authors": {
+    "maochuns": "maochuns.sun@gmail.com"
+  },
+  "source": {
+    "git": "https://github.com/maochuns/maochun-blekit.git",
+    "tag": "0.1.0"
+  },
+  "platforms": {
+    "ios": "8.0"
+  },
+  "source_files": "maochun-blekit/Classes/**/*"
+}

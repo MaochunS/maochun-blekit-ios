@@ -1,0 +1,16 @@
+PODS:
+  - maochun-blekit (0.1.0)
+
+DEPENDENCIES:
+  - maochun-blekit (from `../`)
+
+EXTERNAL SOURCES:
+  maochun-blekit:
+    :path: "../"
+
+SPEC CHECKSUMS:
+  maochun-blekit: d40ebdc02025df24b00512816bd116ad43820b04
+
+PODFILE CHECKSUM: 82a4bb7265be03ca6feea34717e4050dd4bed325
+
+COCOAPODS: 1.9.0.beta.2

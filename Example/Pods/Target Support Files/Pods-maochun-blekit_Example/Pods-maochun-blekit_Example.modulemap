@@ -1,0 +1,6 @@
+framework module Pods_maochun_blekit_Example {
+  umbrella header "Pods-maochun-blekit_Example-umbrella.h"
+
+  export *
+  module * { export * }
+}

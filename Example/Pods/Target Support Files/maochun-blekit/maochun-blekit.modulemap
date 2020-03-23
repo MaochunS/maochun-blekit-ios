@@ -1,0 +1,6 @@
+framework module maochun_blekit {
+  umbrella header "maochun-blekit-umbrella.h"
+
+  export *
+  module * { export * }
+}

@@ -1,0 +1,11 @@
+use_frameworks!
+
+target 'maochun-blekit_Example' do
+  pod 'maochun-blekit', :path => '../'
+
+  target 'maochun-blekit_Tests' do
+    inherit! :search_paths
+
+    
+  end
+end
