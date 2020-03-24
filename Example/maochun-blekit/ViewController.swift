@@ -123,7 +123,8 @@ extension ViewController: BLEDevControllerDelegate {
             
         case ConnDevStatus.ConnDone:
             //Conect successful. Can send data to device
-            //self.bleManager.sendDataRecvReply(data: testData, sendTimeoutInSecond: 0.5, recvTimeoutInSecond: 0.5)
+            //BLEManager.shared.sendDataRecvReply(data: testData, sendTimeoutInSecond: 0.5, recvTimeoutInSecond: 0.5)
+            //BLEManager.shared.sendDataRecvReply(data: testData, timoutInSecond: 0.5)
             break
             
     
