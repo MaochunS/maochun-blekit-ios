@@ -16,7 +16,7 @@ class ViewController: UIViewController {
     let ServiceUUID = CBUUID(string: "BC280001-610E-4C94-A5E2-0F352D4B5256")
     let TXCharacteristicUUID = CBUUID(string: "BC280003-610E-4C94-A5E2-0F352D4B5256")
     let RXCharacteristicUUID = CBUUID(string: "BC280002-610E-4C94-A5E2-0F352D4B5256")
-    let bleManager = BLEManager.shared
+
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -28,17 +28,9 @@ class ViewController: UIViewController {
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
         
-        self.bleManager.delegate = self
-        DispatchQueue.global().async {
-            while (true){
-                
-                if self.bleManager.isStatePoweredOn{
-                    BLEManager.shared.scanForPeripherals(true, serviceUUIDs: [self.ServiceUUID])
-                    break
-                }
-                
-            }
-        }
+        BLEManager.shared.delegate = self
+        BLEManager.shared.scanForPeripherals(true, serviceUUIDs: [self.ServiceUUID])
+                    
         
     }
     
@@ -91,8 +83,10 @@ extension ViewController: BLEDevControllerDelegate {
         print("new dev \(newDev.name()) \(newDev.RSSI)")
         print("Advertisment dict \(newDev.advDict)")
         
-        self.bleManager.scanForPeripherals(false)
-        self.bleManager.connectDevice(dev: newDev, serviceUUID: self.ServiceUUID, rxCharUUID: self.RXCharacteristicUUID, txCharUUID: self.TXCharacteristicUUID)
+        //Check if the device is the right one to connect with
+        
+        BLEManager.shared.scanForPeripherals(false)
+        BLEManager.shared.connectDevice(dev: newDev, serviceUUID: self.ServiceUUID, rxCharUUID: self.RXCharacteristicUUID, txCharUUID: self.TXCharacteristicUUID)
     }
     
     func updateBLEDevice(dev:BLEDev){
@@ -108,7 +102,7 @@ extension ViewController: BLEDevControllerDelegate {
         
         switch status {
         case ConnDevStatus.BLEOff:
-            
+            self.enableBLESetting()
             break
             
         case ConnDevStatus.ConnFailed:
@@ -129,23 +123,16 @@ extension ViewController: BLEDevControllerDelegate {
             
         case ConnDevStatus.ConnDone:
             //Conect successful. Can send data to device
-            self.bleManager
+            //self.bleManager.sendDataRecvReply(data: testData, sendTimeoutInSecond: 0.5, recvTimeoutInSecond: 0.5)
             break
             
-        case ConnDevStatus.WriteFailed:
-            break
-            
-        case ConnDevStatus.WriteDone:
-            break
-            
-        case ConnDevStatus.ReadFailed:
-            break
-            
+    
         case ConnDevStatus.Disconnected:
-            
+            //Device disconnected
             break
             
         }
     }
+    
     
 }

@@ -16,9 +16,6 @@ public enum ConnDevStatus : Int{
     case FindCharacteristicsFailed
     case ConnDone
     case UnsupportedDev
-    case WriteFailed
-    case WriteDone
-    case ReadFailed
     case Disconnected
 }
 
@@ -27,11 +24,14 @@ public enum ConnDevStatus : Int{
     @objc optional func newBLEDevice(newDev:BLEDev)
     @objc optional func updateBLEDevice(dev:BLEDev)
     @objc optional func updateConnDevStatus(status: Int)
+    
+    @objc optional func read(data: Data)
+    @objc optional func writeDone(ret: Bool)
 }
 
 open class BLEManager : NSObject {
     
-    private var receivedBytes: [UInt8] = []
+    //private var receivedBytes: [UInt8] = []
     
     private var centralManager : CBCentralManager?
     private var connBLEDevCtrl : ConnBLEDevController?
@@ -41,10 +41,9 @@ open class BLEManager : NSObject {
     
     private var theBLEDevArr : [BLEDev] = []
     
-    private var maxSendDataSize = 20
     
-
     public var delegate : BLEDevControllerDelegate?
+    static public var enableLog = true
     
     public static let shared: BLEManager = {
         let shared = BLEManager()
@@ -55,6 +54,7 @@ open class BLEManager : NSObject {
     private override init(){
         super.init()
         
+        logw("BLEManager init")
         let centralQueue = DispatchQueue(label: "com.maochun.scanForBLEQueue", attributes: [])
         self.centralManager = CBCentralManager(delegate: self, queue: centralQueue)
         self.centralManager?.delegate = self
@@ -82,8 +82,23 @@ open class BLEManager : NSObject {
     
     public func scanForPeripherals(_ enable:Bool, serviceUUIDs: [CBUUID]? = nil) {
         
-        DispatchQueue.main.async {
-            if enable == true {
+        if enable == true {
+            
+            DispatchQueue.global().async {
+                for _ in 0...50{
+                    
+                    if self.centralManager?.state == .poweredOn{
+                        break
+                    }
+                    
+                    usleep(100000)
+                }
+                
+                if self.centralManager?.state != .poweredOn{
+                    logw("BLE is not powered on. Scan abort!")
+                    return
+                }
+                
                 logw("Start scan BLE")
                 self.theBLEDevArr.removeAll()
                 
@@ -91,15 +106,15 @@ open class BLEManager : NSObject {
                 
                 self.centralManager?.scanForPeripherals(withServices: serviceUUIDs, options: options as? [String : AnyObject])
                 //self.centralManager?.scanForPeripherals(withServices: nil, options: nil)
-                
-
-            } else {
-                logw("Stop scan BLE")
-                self.centralManager?.stopScan()
-                
             }
+            
+        } else {
+            
+            logw("Stop scan BLE")
+            self.centralManager?.stopScan()
+            
         }
-
+            
     }
     
     public func isConnectWithDevice() -> Bool{
@@ -118,7 +133,6 @@ open class BLEManager : NSObject {
         return nil
     }
     
-
     public func reconnectPairedDevice(){
         logw("BLEManager reconnectPairedDevice")
         if let pairedUUID = UUID(uuidString: self.pairedDevUUID),
@@ -142,6 +156,7 @@ open class BLEManager : NSObject {
     }
     
     public func pairDevice(dev:BLEDev, serviceUUID:CBUUID, rxCharUUID:CBUUID, txCharUUID:CBUUID){
+        logw("pair with device \(dev.name()) \(dev.peripheral.identifier.uuidString)")
         let aPeripheral = dev.peripheral
         self.pairedDevUUID = aPeripheral.identifier.uuidString
         self.connectDevice(dev: dev, serviceUUID: serviceUUID, rxCharUUID: rxCharUUID, txCharUUID: txCharUUID)
@@ -157,6 +172,7 @@ open class BLEManager : NSObject {
     }
     
     public func connectDevice(dev:BLEDev, serviceUUID:CBUUID, rxCharUUID:CBUUID, txCharUUID:CBUUID) {
+        logw("connectDevice \(dev.name()) \(dev.peripheral.identifier.uuidString)")
         ConnBLEDevController.ServiceUUID = serviceUUID
         ConnBLEDevController.RXCharacteristicUUID = rxCharUUID
         ConnBLEDevController.TXCharacteristicUUID = txCharUUID
@@ -167,7 +183,7 @@ open class BLEManager : NSObject {
     public func disconnectDevice(){
         logw("BLEManager disconnectPeripheral")
         guard connBLEDevCtrl != nil else {
-            print("Peripheral not set")
+            print("No connected eripheral")
             return
         }
         
@@ -180,44 +196,72 @@ open class BLEManager : NSObject {
     }
     
     public func sendData(byte byteArr : [UInt8]){
+        objc_sync_enter(self)
         let data = NSData(bytes: byteArr, length: byteArr.count) as Data
-        
-        //print("sendData \(Date().timeIntervalSince1970*1000) \(data.count)")
-        //print(data as NSData)
-        
-        if data.count < self.maxSendDataSize{
-            connBLEDevCtrl?.sendData(data: data)
-        }else{
-            self.sendDataUnit(data: data)
-        }
+        logw("sendData byte \(data)")
+        connBLEDevCtrl?.sendDataUnit(data: data)
+        objc_sync_exit(self)
     }
     
-    func sendData(text aText : String){
+    public func sendData(text aText : String){
+        objc_sync_enter(self)
         let data = aText.data(using: String.Encoding.utf8)!
-        connBLEDevCtrl?.sendData(data: data)
+        logw("sendData text \(data)")
+        connBLEDevCtrl?.sendDataUnit(data: data)
+        objc_sync_exit(self)
     }
     
-    func sendDataUnit(data: Data){
-        print("SendDataUnit \(data.count)")
-        print(data as NSData)
-        
-        let unitSize = maxSendDataSize;
-         
-        var dataLeft = data
-        while dataLeft.count > unitSize {
-            let dataUnit = dataLeft.subdata(in: 0..<unitSize)
-            
-            connBLEDevCtrl?.sendData(data: dataUnit)
-            
-            
-            dataLeft = dataLeft.subdata(in: unitSize..<dataLeft.count)
-        }
-        
-        if dataLeft.count > 0{
-            connBLEDevCtrl?.sendData(data: dataLeft)
-        }
-        
+    public func sendData(data theData: Data){
+        objc_sync_enter(self)
+        logw("sendData \(theData)")
+        connBLEDevCtrl?.sendDataUnit(data: theData)
+        objc_sync_exit(self)
     }
+    
+    
+    public func sendDataSync(byte byteArr : [UInt8], timeoutInSecond:Double = 0.5) -> Bool{
+        objc_sync_enter(self)
+        let data = NSData(bytes: byteArr, length: byteArr.count) as Data
+        logw("sendDataSync byte \(data) \(timeoutInSecond)")
+        connBLEDevCtrl?.sendDataTimeout = timeoutInSecond
+        let ret = connBLEDevCtrl?.sendDataUnitSync(data: data) ?? false
+        objc_sync_exit(self)
+        return ret
+    }
+    
+    public func sendDataSync(text aText : String, timeoutInSecond:Double = 0.5) -> Bool{
+        objc_sync_enter(self)
+        let data = aText.data(using: String.Encoding.utf8)!
+        logw("sendDataSync text \(data) \(timeoutInSecond)")
+        connBLEDevCtrl?.sendDataTimeout = timeoutInSecond
+        let ret = connBLEDevCtrl?.sendDataUnitSync(data: data) ?? false
+        objc_sync_exit(self)
+        return ret
+    }
+    
+    public func sendDataSync(data theData: Data, timeoutInSecond:Double = 0.5) -> Bool{
+        
+        objc_sync_enter(self)
+        logw("sendDataSync \(theData) \(timeoutInSecond)")
+        connBLEDevCtrl?.sendDataTimeout = timeoutInSecond
+        let ret = connBLEDevCtrl?.sendDataUnitSync(data: theData) ?? false
+        objc_sync_exit(self)
+        
+        return ret
+    }
+    
+    public func sendDataRecvReply(data theData: Data, sendTimeoutInSecond:Double = 0.5, recvTimeoutInSecond:Double = 0.5) -> (ret:Bool, reply:Data?){
+        
+        objc_sync_enter(self)
+        logw("sendDataRecvReply \(theData) \(sendTimeoutInSecond) \(recvTimeoutInSecond)")
+        connBLEDevCtrl?.sendDataTimeout = sendTimeoutInSecond
+        connBLEDevCtrl?.recvDataTimeout = recvTimeoutInSecond
+        let ret = connBLEDevCtrl?.sendDataRecvReply(data: theData) ?? (false, nil)
+        objc_sync_exit(self)
+        
+        return ret
+    }
+    
 }
 
 extension BLEManager :  CBCentralManagerDelegate{
@@ -251,7 +295,7 @@ extension BLEManager :  CBCentralManagerDelegate{
             break
   
         }
-        print("BLE Manager status \(state)")
+        logw("BLE Manager status \(state)")
     }
     
     public func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber){
@@ -278,6 +322,7 @@ extension BLEManager :  CBCentralManagerDelegate{
     }
     
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral){
+        logw("centralManager didConnect with \(peripheral.identifier.uuidString)")
         connBLEDevCtrl = ConnBLEDevController(connectedWith: peripheral)
         connBLEDevCtrl?.delegate = self
         
@@ -287,13 +332,13 @@ extension BLEManager :  CBCentralManagerDelegate{
     }
     
     public func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?){
-     
+        logw("centralManager didFailToConnect with \(peripheral.identifier.uuidString) \(error?.localizedDescription ?? "")")
         delegate?.updateConnDevStatus?(status: ConnDevStatus.ConnFailed.rawValue)
     }
     
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?){
         
-        print("centralManager didDisconnectPeripheral")
+        logw("centralManager didDisconnectPeripheral with \(peripheral.identifier.uuidString) \(error?.localizedDescription ?? "")")
       
         delegate?.updateConnDevStatus?(status: ConnDevStatus.Disconnected.rawValue)
         
@@ -329,8 +374,14 @@ extension BLEManager : ConnBLEDevControllerDelegate{
     
     func readData(data: Data){
         
-        let bytes = [UInt8](data)
-        receivedBytes.append(contentsOf: bytes)
+        //let bytes = [UInt8](data)
+        //receivedBytes.append(contentsOf: bytes)
+        
+        delegate?.read?(data: data)
+    }
+    
+    func writeDone(ret: Bool){
+        delegate?.writeDone?(ret: ret)
     }
 }
 

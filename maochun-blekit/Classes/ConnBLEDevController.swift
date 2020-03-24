@@ -15,11 +15,14 @@ import CoreBluetooth
     
     @objc optional func updateConnDevStatus(status: Int)
     @objc optional func readData(data: Data)
+    @objc optional func writeDone(ret: Bool)
 }
 
 class ConnBLEDevController: NSObject {
     var bluetoothPeripheral : CBPeripheral!
     var delegate : ConnBLEDevControllerDelegate?
+    
+    private var maxSendDataSize = 20
     
     /*
     fileprivate let _ServiceUUID             : CBUUID = CBUUID(string: "6E400001-B5A3-F393-E0A9-E50E24DCCA9E")
@@ -37,7 +40,6 @@ class ConnBLEDevController: NSObject {
     static var TXCharacteristicUUID = CBUUID(string: "6E400002-B5A3-F393-E0A9-E50E24DCCA9E")
     static var RXCharacteristicUUID = CBUUID(string: "6E400003-B5A3-F393-E0A9-E50E24DCCA9E")
     
-   
     fileprivate var _Service: CBService?
     fileprivate var _RXCharacteristic: CBCharacteristic?
     fileprivate var _TXCharacteristic: CBCharacteristic?
@@ -46,22 +48,69 @@ class ConnBLEDevController: NSObject {
     fileprivate var recvReplyDG : DispatchGroup?
     fileprivate var receivedData: Data?
     
+    public var sendDataTimeout : Double = 0.5
+    public var recvDataTimeout : Double = 0.5
+    
     
     init(connectedWith peripheral : CBPeripheral){
         super.init()
         
+        logw("ConnBLEDevController init")
         bluetoothPeripheral = peripheral
         bluetoothPeripheral.delegate = self
         bluetoothPeripheral.discoverServices([ConnBLEDevController.ServiceUUID])
         
     }
     
-    func sendData(data: Data){
+    func sendDataUnit(data: Data){
+        print("SendDataUnit \(data.count)")
+        print(data as NSData)
+        
+        let unitSize = maxSendDataSize;
+         
+        var dataLeft = data
+        while dataLeft.count > unitSize {
+            let dataUnit = dataLeft.subdata(in: 0..<unitSize)
+            
+            sendData(data: dataUnit)
+            dataLeft = dataLeft.subdata(in: unitSize..<dataLeft.count)
+        }
+        
+        if dataLeft.count > 0{
+            sendData(data: dataLeft)
+        }
+    }
+    
+    func sendDataUnitSync(data: Data) -> Bool{
+        let unitSize = maxSendDataSize;
+         
+        var ret = false
+        var dataLeft = data
+        while dataLeft.count > unitSize {
+            let dataUnit = dataLeft.subdata(in: 0..<unitSize)
+            
+            ret = sendDataSync(data: dataUnit)
+            dataLeft = dataLeft.subdata(in: unitSize..<dataLeft.count)
+            
+            if !ret{
+                return ret
+            }
+        }
+        
+        if dataLeft.count > 0{
+            ret = sendDataSync(data: dataLeft)
+        }
+        
+        return ret
+    }
+    
+    private func sendData(data: Data){
         //print("sendData \(data as NSData)")
         if bluetoothPeripheral.state == .connected, let txChar = self._TXCharacteristic{
             bluetoothPeripheral.writeValue(data, for: txChar, type: .withoutResponse)
         }else{
-            print("sendData abort!")
+            logw("device disconnected. sendData abort!")
+            delegate?.writeDone?(ret: false)
         }
     }
     
@@ -73,7 +122,7 @@ class ConnBLEDevController: NSObject {
             sendcmdReqDG = DispatchGroup()
             self.sendcmdReqDG!.enter()
             bluetoothPeripheral.writeValue(data, for: txChar, type: .withoutResponse)
-            let waitRet = self.sendcmdReqDG!.wait(timeout: .now() + 0.2)
+            let waitRet = self.sendcmdReqDG!.wait(timeout: .now() + self.sendDataTimeout)
             switch waitRet{
             case .success:
                 ret = true
@@ -93,6 +142,34 @@ class ConnBLEDevController: NSObject {
         return ret
     }
     
+    func sendDataRecvReply(data: Data) -> (ret: Bool, reply: Data?){
+        
+        var ret = false
+        
+        recvReplyDG = DispatchGroup()
+        self.recvReplyDG!.enter()
+        self.receivedData = nil
+        
+        if self.sendDataUnitSync(data: data){
+            let waitRet = self.recvReplyDG!.wait(timeout: .now() + self.recvDataTimeout)
+            switch waitRet{
+            case .success:
+                //print("sendCmdRecvDataSync success")
+                ret = true
+                break
+                
+            case .timedOut:
+                //print("sendCmdRecvDataSync timeout")
+                ret = false
+                break
+            }
+        }
+        
+        self.recvReplyDG = nil
+        return (ret, self.receivedData)
+    }
+    
+    /*
     func sendCmdRecvDataSync(data: Data) -> (ret: Bool, reply: Data?){
         print("sendCmdRecvDataSync")
         var ret = false
@@ -141,6 +218,7 @@ class ConnBLEDevController: NSObject {
         
         return (ret: ret, reply: self.receivedData)
     }
+    */
 }
 
 extension ConnBLEDevController: CBPeripheralDelegate{
@@ -149,12 +227,12 @@ extension ConnBLEDevController: CBPeripheralDelegate{
     }
     
     func peripheral(_ peripheral: CBPeripheral, didReadRSSI RSSI: NSNumber, error: Error?){
-        print("rssi = \(RSSI)")
+        //print("rssi = \(RSSI)")
     }
     
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?){
         guard error == nil else {
-            print("Service discovery failed \(error.debugDescription)")
+            logw("Service discovery failed \(error?.localizedDescription ?? "")")
             delegate?.updateConnDevStatus?(status: ConnDevStatus.FindServiceFailed.rawValue)
             return
         }
@@ -166,14 +244,15 @@ extension ConnBLEDevController: CBPeripheralDelegate{
             }
         }
         
+        logw("Didn't find the service. Device unsupported!")
         delegate?.updateConnDevStatus?(status: ConnDevStatus.UnsupportedDev.rawValue)
-        print("Device unsupported!")
+        
     }
     
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?){
         
         guard error == nil else {
-            print("Characteristics discovery failed \(error.debugDescription)")
+            print("Characteristics discovery failed \(error?.localizedDescription ?? "")")
             delegate?.updateConnDevStatus?(status: ConnDevStatus.FindCharacteristicsFailed.rawValue)
             return
         }
@@ -181,12 +260,12 @@ extension ConnBLEDevController: CBPeripheralDelegate{
         if service.uuid.isEqual(ConnBLEDevController.ServiceUUID) {
             for aCharacteristic : CBCharacteristic in service.characteristics! {
                 if aCharacteristic.uuid.isEqual(ConnBLEDevController.TXCharacteristicUUID) {
-                    print("TX Characteristic found")
+                    logw("TX Characteristic found")
                     _TXCharacteristic = aCharacteristic
                 }
                 
                 if aCharacteristic.uuid.isEqual(ConnBLEDevController.RXCharacteristicUUID) {
-                    print("RX Characteristic found")
+                    logw("RX Characteristic found")
                     _RXCharacteristic = aCharacteristic
                 }
             }
@@ -197,13 +276,14 @@ extension ConnBLEDevController: CBPeripheralDelegate{
                 
                 //delegate?.updateConnDevStatus?(status: ConnDevStatus.ConnDone.rawValue)
                
+                logw("Set Rx notification value")
                 bluetoothPeripheral!.setNotifyValue(true, for: _RXCharacteristic!)
                 
                 
             } else {
-                
+                logw("Didn't find the Tx/Rx characteristic. Unsupported device!")
                 delegate?.updateConnDevStatus?(status: ConnDevStatus.UnsupportedDev.rawValue)
-                print("Unsupported device!")
+                
             }
         }
     }
@@ -211,8 +291,7 @@ extension ConnBLEDevController: CBPeripheralDelegate{
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?){
         
         guard error == nil else {
-            print("Updating characteristic has failed \(error.debugDescription)")
-           
+            logw("Updating characteristic has failed \(error?.localizedDescription ?? "")")
             return
         }
         
@@ -221,17 +300,15 @@ extension ConnBLEDevController: CBPeripheralDelegate{
         
         // try to print a friendly string of received bytes if they can be parsed as UTF8
         guard let dataReceived = characteristic.value else {
-            print("Notification received from: \(characteristic.uuid.uuidString), with empty value")
-            delegate?.updateConnDevStatus?(status: ConnDevStatus.ReadFailed.rawValue)
+            logw("Notification received from: \(characteristic.uuid.uuidString), with empty value")
             self.recvReplyDG?.leave()
             return
         }
         
         
-        
         //let str : String = NSString(data: dataReceived, encoding: String.Encoding.utf8.rawValue)! as String
-        //print("\(Date().timeIntervalSince1970*1000) didReceiveData from characteristic \(characteristic.uuid.uuidString)")
-        //print(dataReceived as NSData)
+        logw("\(Date().timeIntervalSince1970*1000) didReceiveData from characteristic \(characteristic.uuid.uuidString)")
+        //logw(dataReceived as NSData)
         
         self.receivedData = dataReceived
         self.recvReplyDG?.leave()
@@ -241,35 +318,33 @@ extension ConnBLEDevController: CBPeripheralDelegate{
     
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?){
         guard error == nil else {
-            print("Writing value to characteristic has failed \(error.debugDescription)")
-            delegate?.updateConnDevStatus?(status: ConnDevStatus.WriteFailed.rawValue)
+            logw("Writing value to characteristic failed \(error?.localizedDescription ?? "")")
+            delegate?.writeDone?(ret: false)
             
             self.sendcmdReqDG?.leave()
             return
         }
         
-        delegate?.updateConnDevStatus?(status: ConnDevStatus.WriteDone.rawValue)
-        print("Data written to characteristic: \(characteristic.uuid.uuidString)")
+        delegate?.writeDone?(ret: true)
+        logw("Data has written to characteristic: \(characteristic.uuid.uuidString)")
         
         self.sendcmdReqDG?.leave()
     }
     
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor descriptor: CBDescriptor, error: Error?) {
         guard error == nil else {
-            print("Writing value to descriptor has failed \(error.debugDescription)")
+            logw("Writing value to descriptor failed \(error?.localizedDescription ?? "")")
            
             return
         }
         
-        
-        
-        print("Data written to descriptor: \(descriptor.uuid.uuidString)")
+        logw("Data has written to descriptor: \(descriptor.uuid.uuidString)")
     }
     
     func peripheral(_ peripheral: CBPeripheral, didUpdateNotificationStateFor characteristic: CBCharacteristic, error: Error?){
         
         guard error == nil else {
-            print("Enabling notifications failed \(error.debugDescription)")
+            logw("Enabling notifications failed \(error?.localizedDescription ?? "")")
             
             delegate?.updateConnDevStatus?(status: ConnDevStatus.FindCharacteristicsFailed.rawValue)
             return

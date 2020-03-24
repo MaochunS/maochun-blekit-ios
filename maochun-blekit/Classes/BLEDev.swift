@@ -10,7 +10,10 @@ import Foundation
 import CoreBluetooth
 
 public func logw(_ text: String) {
-    print(text)
+    if BLEManager.enableLog{
+        print(text)
+    }
+    
 }
 
 open class BLEDev: NSObject {
